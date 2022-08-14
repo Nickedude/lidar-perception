@@ -52,7 +52,8 @@ def _build_pillar_feature_network(
             )
         )
     )
-    feature_network.add(tf.keras.layers.Dense(units=number_of_features))
+    # Fully connected layer is implemented using 1x1 convolution
+    feature_network.add(tf.keras.layers.Conv2D(filters=number_of_features, kernel_size=1))
     feature_network.add(tf.keras.layers.BatchNormalization())
     feature_network.add(tf.keras.layers.ReLU())
     feature_network.add(ReduceMax(axis=2))

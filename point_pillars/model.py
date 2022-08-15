@@ -1,77 +1,87 @@
 """Keras implementation of PointPillars."""
-from typing import Tuple
-
 import tensorflow as tf
 
 
-class ReduceMax(tf.keras.layers.Layer):
-    """Convenience class for wrapping reduce_max in a layer."""
+class FeatureNetwork(tf.keras.Sequential):
+    def __init__(
+        self,
+        height: int,
+        width: int,
+        number_of_pillars: int,
+        points_per_pillar: int,
+        point_dimensionality: int,
+        number_of_features: int = 128,
+    ):
+        """Build pillar feature network.
 
-    def __init__(self, axis: int = -1):
-        """Constructor.
+        Assumes input tensor of shape B x P x N x D.
+        Outputs tensor of shape B x H x W x C.
+        Where B is the batch size.
 
         Args:
-            axis: the axis to reduce
+            height: height of pseudo-image, H
+            width: width of pseudo-image
+            number_of_pillars: number of pillars, P
+            points_per_pillar: number of points per pillar, N
+            point_dimensionality: number of features per point, D
+            number_of_features: number of features, C
 
         """
-        super().__init__(trainable=False, name="reduce_max")
-        self._axis = axis
+        super().__init__(name="feature_network")
+        self._height = height
+        self._width = width
+        self._num_features = number_of_features
 
-    def call(self, inputs: tf.Tensor, *args, **kwargs) -> tf.Tensor:
-        """Apply max reduction to inputs."""
-        return tf.math.reduce_max(inputs, self._axis)
-
-
-def _build_pillar_feature_network(
-    number_of_pillars: int,
-    points_per_pillar: int,
-    point_dimensionality: int,
-    number_of_features: int = 128,
-) -> tf.keras.Sequential:
-    """Build pillar feature network.
-
-    Assumes input tensor of shape B x P x N x D.
-    Outputs tensor of shape B x P x C.
-    Where B is the batch size.
-
-    Args:
-        number_of_pillars: number of pillars, P
-        points_per_pillar: number of points per pillar, N
-        point_dimensionality: number of features per point, D
-        number_of_features: number of features, C
-
-    """
-
-    feature_network = tf.keras.models.Sequential()
-    feature_network.add(
-        tf.keras.Input(
-            shape=(
-                number_of_pillars,
-                points_per_pillar,
-                point_dimensionality,
+        self.add(
+            tf.keras.Input(
+                shape=(
+                    number_of_pillars,
+                    points_per_pillar,
+                    point_dimensionality,
+                )
             )
         )
-    )
-    # Fully connected layer is implemented using 1x1 convolution
-    feature_network.add(tf.keras.layers.Conv2D(filters=number_of_features, kernel_size=1))
-    feature_network.add(tf.keras.layers.BatchNormalization())
-    feature_network.add(tf.keras.layers.ReLU())
-    feature_network.add(ReduceMax(axis=2))
+        self.add(tf.keras.Input(shape=(number_of_pillars, 2)))
+        # Fully connected layer is implemented using 1x1 convolution
+        self.add(tf.keras.layers.Conv2D(filters=number_of_features, kernel_size=1))
+        self.add(tf.keras.layers.BatchNormalization())
+        self.add(tf.keras.layers.ReLU())
 
-    return feature_network
+    def call(self, inputs, training=None, mask=None):
+        data, indices = inputs
+        batch_size, num_pillars, _, _ = data.shape
+        assert indices.shape == (batch_size, num_pillars, 3)
+
+        outputs = super().call(data, training, mask)  # B x P x N x C
+        outputs = tf.math.reduce_max(
+            outputs, axis=2
+        )  # Max reduction across points -> B x P x C
+
+        output_shape = (batch_size, self._height, self._width, self._num_features)
+        outputs = tf.scatter_nd(
+            indices, outputs, output_shape
+        )  # Scatter to grid -> B x H x W x C
+
+        return outputs
 
 
 def build_model(
-    number_of_pillars: int, points_per_pillar: int, point_dimensionality: int
+    height: int,
+    width: int,
+    number_of_pillars: int,
+    points_per_pillar: int,
+    point_dimensionality: int,
 ):
     """Build PointPillar network.
 
     Args:
+        height: height of pseudo-image, H
+        width: width of pseudo-image: W
         number_of_pillars: number of pillars, P
         points_per_pillar: number of points per pillar, N
         point_dimensionality: number of features per point, D
 
     """
-    return _build_pillar_feature_network(
-        number_of_pillars, points_per_pillar, point_dimensionality
+    return FeatureNetwork(
+        height, width, number_of_pillars, points_per_pillar, point_dimensionality
     )

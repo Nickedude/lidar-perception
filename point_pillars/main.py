@@ -1,7 +1,11 @@
 """Build, train and evaluate the PointPillars model."""
+import sys
+
 from model import build_model
 
 import numpy as np
+
+from point_pillars.preprocessing import create_pillars
 
 
 def create_dummy_indices(height: int, width: int, batch_idx: int):
@@ -27,6 +31,9 @@ def main():
     point_dimensionality = 9  # D
     points_per_pillar = 16  # N
     number_of_pillars = height * width  # P
+
+    points = np.fromfile(sys.argv[1], dtype=np.float32).reshape(-1, 4)
+    create_pillars(points, number_of_pillars, points_per_pillar)
 
     dummy_data = np.random.rand(
         batch_size, number_of_pillars, points_per_pillar, point_dimensionality
